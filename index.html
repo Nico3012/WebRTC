@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>camera</title>
+    <style>
+        #msg {
+            position: fixed;
+            left: 0;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #00000099;
+        }
+
+        #msg div {
+            display: flex;
+            flex-direction: column;
+            background-color: #ffffff;
+            padding: 8px;
+        }
+
+        #msg div *:not(span) {
+            margin: 8px;
+            padding: 8px;
+        }
+
+        #msg p {
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div>
+        <span>WebRTC is able to connect peers over the internet. To increase the chance of a successful connection, you
+            should request the website from the same server on both peers. If a peer still refuses the connection, try
+            swapping the host.</span><br><br>
+        <span>camera width</span><input id="width" type="number" value="640"><br>
+        <span>camera height</span><input id="height" type="number" value="480"><br>
+        <span>front camera</span><input id="front" type="checkbox" checked><br><br>
+        <span>video</span><button id="video">true</button><br>
+        <span>audio</span><button id="audio">true</button><br><br>
+        <button id="co">create offer</button><br>
+        <button id="io">insert offer</button><br>
+    </div>
+    <video id="cam" autoplay muted playsinline></video>
+    <script>
+
+        // HTMLCanvasElement.captureStream()
+        // https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/captureStream
+
+        // Manipulating video using canvas
+        // https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Manipulating_video_using_canvas
+
+        const cam = document.querySelector('#cam');
+        const width = document.querySelector('#width');
+        const height = document.querySelector('#height');
+        const front = document.querySelector('#front');
+        const video = document.querySelector('#video');
+        const audio = document.querySelector('#audio');
+        const offer = document.querySelector('#offer');
+        const answer = document.querySelector('#answer');
+        const co = document.querySelector('#co');
+        const io = document.querySelector('#io');
+
+        addEventListener('load', getMedia);
+        width.addEventListener('change', getMedia);
+        height.addEventListener('change', getMedia);
+        front.addEventListener('change', getMedia);
+        video.addEventListener('click', muteVideo);
+        audio.addEventListener('click', muteAudio);
+        co.addEventListener('click', createOffer);
+        io.addEventListener('click', insertOffer);
+
+        let localStream = new MediaStream();
+
+        async function getMedia() {
+            cam.srcObject = null;
+
+            localStream.getTracks().forEach(function (track) {
+                track.stop();
+            });
+
+            localStream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: {
+                    width: { exact: width.valueAsNumber },
+                    height: { exact: height.valueAsNumber },
+                    frameRate: { ideal: 30 },
+                    facingMode: { ideal: (function () { if (front.checked) return 'user'; return 'environment'; })() }
+                }
+            });
+
+            cam.srcObject = localStream;
+        };
+
+        function muteAudio() {
+            localStream.getTracks().forEach(function (track) {
+                if (track.kind === 'audio') {
+                    track.enabled = !track.enabled;
+                    audio.textContent = track.enabled.toString();
+                }
+            });
+        }
+
+        function muteVideo() {
+            localStream.getTracks().forEach(function (track) {
+                if (track.kind === 'video') {
+                    track.enabled = !track.enabled;
+                    video.textContent = track.enabled.toString();
+                }
+            });
+        }
+
+        async function createOffer() {
+            const pc = new RTCPeerConnection();
+            const remoteStream = new MediaStream();
+
+            const remoteVideo = document.createElement('video');
+            remoteVideo.autoplay = true;
+            remoteVideo.playsInline = true;
+            remoteVideo.srcObject = remoteStream;
+
+            document.body.append(remoteVideo);
+
+            const btn = document.createElement('button');
+            btn.textContent = 'Close connection';
+
+            btn.addEventListener('click', function () {
+                remoteVideo.remove();
+                this.remove();
+                pc.close();
+            });
+
+            document.body.append(btn);
+
+            localStream.getTracks().forEach(function (track) {
+                pc.addTrack(track, localStream);
+            });
+
+            pc.addEventListener('track', function (e) {
+                e.streams[0].getTracks().forEach(function (track) {
+                    remoteStream.addTrack(track);
+                });
+            });
+
+            pc.addEventListener('icecandidate', async function (e) {
+                if (e.candidate) {
+                    await asyncAlert('copy your offer', JSON.stringify(pc.localDescription.sdp));
+                    pc.setRemoteDescription({ type: "answer", sdp: JSON.parse(await asyncPrompt('insert Answer')) });
+                }
+            });
+
+            pc.setLocalDescription(await pc.createOffer());
+        }
+
+        async function insertOffer() {
+            const pc = new RTCPeerConnection();
+            const remoteStream = new MediaStream();
+
+            const remoteVideo = document.createElement('video');
+            remoteVideo.autoplay = true;
+            remoteVideo.playsInline = true;
+            remoteVideo.srcObject = remoteStream;
+
+            document.body.append(remoteVideo);
+
+            const btn = document.createElement('button');
+            btn.textContent = 'Close connection';
+
+            btn.addEventListener('click', function () {
+                remoteVideo.remove();
+                this.remove();
+                pc.close();
+            });
+
+            document.body.append(btn);
+
+            localStream.getTracks().forEach(function (track) {
+                pc.addTrack(track, localStream);
+            });
+
+            pc.addEventListener('track', function (e) {
+                e.streams[0].getTracks().forEach(function (track) {
+                    remoteStream.addTrack(track);
+                });
+            });
+
+            pc.addEventListener('icecandidate', async function (e) {
+                if (e.candidate) {
+                    await asyncAlert('copy your answer', JSON.stringify(pc.localDescription.sdp));
+                }
+            });
+
+            pc.setRemoteDescription({ type: 'offer', sdp: JSON.parse(await asyncPrompt('insert Offer')) });
+            pc.setLocalDescription(await pc.createAnswer());
+        }
+
+        function asyncPrompt(val) {
+            if (document.querySelector('#msg')) document.querySelector('#msg').remove();
+
+            const elm1 = document.createElement('div');
+            const elm2 = document.createElement('div');
+            const elm3 = document.createElement('p');
+            const elm4 = document.createElement('input');
+            const elm5 = document.createElement('input');
+
+            elm1.id = 'msg';
+            elm3.textContent = val;
+            elm4.type = 'text';
+            elm5.type = 'button';
+            elm5.value = 'submit';
+
+            elm2.appendChild(elm3);
+            elm2.appendChild(elm4);
+            elm2.appendChild(elm5);
+            elm1.appendChild(elm2);
+            document.body.appendChild(elm1);
+
+            return new Promise(function (res) {
+                elm5.addEventListener('click', function () {
+                    elm1.remove();
+                    res(elm4.value);
+                });
+            });
+        }
+
+        function asyncAlert(txt, val) {
+            if (document.querySelector('#msg')) document.querySelector('#msg').remove();
+
+            const elm1 = document.createElement('div');
+            const elm2 = document.createElement('div');
+            const elm3 = document.createElement('p');
+            const elm4 = document.createElement('span');
+            const elm5 = document.createElement('input');
+            const elm6 = document.createElement('input');
+            const elm7 = document.createElement('input');
+
+            elm1.id = 'msg';
+            elm3.textContent = txt;
+            elm5.type = 'text';
+            elm5.readOnly = true;
+            elm5.value = val;
+            elm6.type = 'button';
+            elm6.value = 'copy';
+            elm7.type = 'button';
+            elm7.value = 'close';
+
+            elm4.appendChild(elm5);
+            elm4.appendChild(elm6);
+            elm2.appendChild(elm3);
+            elm2.appendChild(elm4);
+            elm2.appendChild(elm7);
+            elm1.appendChild(elm2);
+            document.body.appendChild(elm1);
+
+            elm6.addEventListener('click', function () {
+                navigator.clipboard.writeText(elm5.value);
+            });
+
+            return new Promise(function (res) {
+                elm7.addEventListener('click', function () {
+                    elm1.remove();
+                    res();
+                });
+            });
+        }
+    </script>
+</body>
+
+</html>
